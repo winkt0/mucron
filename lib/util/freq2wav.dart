@@ -14,15 +14,29 @@ Uint8List frequenciesToPcmBytes(
   int freqIndex = -1;
   for (int i = 0; freqIndex + 1 < frequencies.length; i++) {
     if (i % (sampleCount / frequencies.length).ceil() == 0) freqIndex++;
-    freq =
-        frequencies[freqIndex];
+    freq = frequencies[freqIndex];
     final t = i / sampleRate;
-    final double sample = volume * sin(2 * pi * freq * t);
+    double phase = 2 * pi * freq * t;
+    if (freqIndex > 0) {
+      phase = smoothFrequencyTransition(frequencies, freqIndex, freq, phase, t);
+    }
+    final double sample = volume * sin(phase);
+
+    // Little-endian bytes
     byteList.add(sample.round() & 0xFF);
     byteList.add((sample.round() >> 8) & 0xFF);
   }
 
   return Uint8List.fromList(byteList);
+}
+
+// Sudden transitions between frequencies create crackling sounds or loud bips ()
+double smoothFrequencyTransition(List<double> frequencies, int freqIndex, double freq, double phase, double t) {
+  final oldFreq = frequencies[freqIndex - 1];
+  if (freq != oldFreq) {
+    phase += 2 * pi * oldFreq * t;
+  }
+  return phase;
 }
 
 Uint8List makeWav(
@@ -33,7 +47,8 @@ Uint8List makeWav(
 }) {
   final dataSize = pcm.length;
   final numHeaderBytes = 44;
-  final riffSize = numHeaderBytes + dataSize - 8;
+  final riffSize = numHeaderBytes + dataSize - 8; // - 8 is obligatory
+
   final header = BytesBuilder();
 
   header.add("RIFF".codeUnits);
@@ -46,8 +61,8 @@ Uint8List makeWav(
 
   header.add("WAVE".codeUnits);
   header.add("fmt ".codeUnits);
-  header.add([0x10, 0x00, 0x00, 0x00]);
-  header.add([0x01, 0x00]);
+  header.add([0x10, 0x00, 0x00, 0x00]); // PCM fmt chunk size
+  header.add([0x01, 0x00]); // PCM format
   header.add([numChannels & 0xFF, (numChannels & 0xFF00) >> 8]);
 
   header.add([
